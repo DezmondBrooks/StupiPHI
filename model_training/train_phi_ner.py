@@ -6,18 +6,23 @@ import evaluate
 import numpy as np
 from utils import tokenize_and_align_labels, label_list, label2id, id2label
 
-# Load dataset / trust is included to allow execution of its custom loading code
+# Step 1: Load the CONLL-2003 dataset, which contains named entity labels for people, organizations, etc.
+# This is a standard dataset for NER tasks and provides labeled tokens we can use to train on PII-like patterns.
 raw_datasets = load_dataset("conll2003", trust_remote_code=True)
 
-
-# Load tokenizer and tokenize dataset
+# Step 2: Load the tokenizer for the base model (BERT in this case).
+# The tokenizer splits input text into tokens that match the model's expectations.
 tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
+
+# Step 3: Tokenize the dataset and align labels for each token.
+# This transforms raw text and entity annotations into token-level inputs the model can train on.
 tokenized_datasets = raw_datasets.map(
     lambda x: tokenize_and_align_labels(x, tokenizer),
     batched=True
 )
 
-# Load model
+# Step 4: Load a pretrained BERT model and attach a classification head for token level prediction.
+# We specify how many entity classes there are and how to map between class IDs and names.
 model = AutoModelForTokenClassification.from_pretrained(
     "bert-base-cased",
     num_labels=len(label_list),
@@ -25,7 +30,8 @@ model = AutoModelForTokenClassification.from_pretrained(
     label2id=label2id
 )
 
-# Training arguments
+# Step 5: Define training hyperparameters and behavior.
+# This includes evaluation strategy, batch size, learning rate, and where to save model outputs.
 args = TrainingArguments(
     output_dir="./phi-bert-model",
     evaluation_strategy="epoch",
@@ -40,10 +46,15 @@ args = TrainingArguments(
     report_to="none"
 )
 
+# Step 6: Create a data collator that batches tokenized examples for training.
+# This ensures padding and label alignment is handled correctly in training batches.
 data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
 
+# Step 7: Load evaluation metric for NER tasks.
+# We use seqeval to calculate precision, recall, and F1 scores for entity recognition.
 metric = evaluate.load("seqeval")
 
+# Step 8: Define a metric function to compute evaluation metrics after each epoch.
 def compute_metrics(p):
     predictions, labels = p
     predictions = np.argmax(predictions, axis=2)
@@ -54,7 +65,8 @@ def compute_metrics(p):
     ]
     return metric.compute(predictions=true_preds, references=true_labels)
 
-# Trainer
+# Step 9: Create and configure the Hugging Face Trainer.
+# This wraps our model, data, tokenizer, and training args into a training loop.
 trainer = Trainer(
     model=model,
     args=args,
@@ -65,8 +77,9 @@ trainer = Trainer(
     compute_metrics=compute_metrics
 )
 
+# Step 10: Train the model using the provided dataset and settings.
 trainer.train()
 
-# Save model and tokenizer
+# Step 11: Save the final trained model and tokenizer to disk for reuse or deployment.
 trainer.save_model("phi-bert-model")
 tokenizer.save_pretrained("phi-bert-model")
