@@ -1,0 +1,10 @@
+This system exist to bridge the gap between production data and dev and staging test data. Due to privacy laws in health care pulling patient records into a dev env for debugging is often not possible.
+The system aims to depersonalize patient identifing information using AI. Allowing devs to pull on acurrate real world data for accurate testing and debugging, without directly housing PII locally. 
+
+The system will not change anything besides PHI/PII . The system will not put the changes into the target database. the deliverable is a parsable file for easy record creation.
+
+A correct outcome is all PII/PHI being removed/redacted or faked
+faked: John => Bob
+
+A dangerous outcome is PII remains in records. System becomes a security risk/ weak point for attackers.
+

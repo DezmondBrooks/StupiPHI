@@ -1,0 +1,23 @@
+A) Production Mode (Secure Boundary)
+
+source: prod DB connector (runs inside network)
+
+transform: in-memory sanitize pipeline
+
+sink: dev/staging DB
+
+audit: secure log store
+
+never write raw exports to disk
+
+B) Dev/Test Mode (Portfolio)
+
+source: synthetic dataset generator or JSONL
+
+optional: seed into local Postgres
+
+run same pipeline
+
+sink: local Postgres + sanitized JSONL
+
+audit + eval artifacts
