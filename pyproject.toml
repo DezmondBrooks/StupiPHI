@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stupiphi"
+version = "0.1.0"
+description = "Open-source sanitization engine for healthcare-like data (PHI/PII detection and transformation)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "faker>=22.0.0",
+    "PyYAML>=6.0",
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+stupiphi = "stupiphi.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "stupiphi",
+    "config",
+    "detection",
+    "transformation",
+    "sanitizer",
+    "models",
+    "ingestion",
+    "evals",
+    "audit",
+    "verification",
+]
