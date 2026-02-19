@@ -1,0 +1,8 @@
+# StupiPHI core dependencies
+faker>=22.0.0
+transformers>=4.30.0
+torch>=2.0.0
+PyYAML>=6.0
+
+# Optional: for evaluation and tests
+pytest>=7.0.0
