@@ -76,3 +76,32 @@ def test_apply_plan_redacts_and_fakes() -> None:
     assert "555-123-4567" not in sanitized.encounter_notes
     assert sanitized.patient.first_name != "Jane" or sanitized.patient.last_name != "Doe"
     assert sanitized.record_id == "rec1"
+
+
+def test_apply_plan_stable_pseudonym_same_value_same_output() -> None:
+    """With pseudonym_salt set, same original value in two records yields the same pseudonym."""
+    patient = PatientInfo(
+        first_name="Alice",
+        last_name="Smith",
+        dob="1985-06-20",
+        phone="555-000-1111",
+        address="10 Same St",
+        email="alice@example.com",
+    )
+    meta = Metadata(source="test", created_at="2024-01-01T00:00:00Z")
+    plan = TransformationPlan(record_id="any", actions=[])
+    salt = "test-salt-123"
+
+    record1 = CanonicalRecord(record_id="r1", patient=patient, encounter_notes="Note 1", metadata=meta)
+    record2 = CanonicalRecord(record_id="r2", patient=patient, encounter_notes="Note 2", metadata=meta)
+
+    out1, _ = apply_plan(record1, plan, seed=99, pseudonym_salt=salt)
+    out2, _ = apply_plan(record2, plan, seed=99, pseudonym_salt=salt)
+
+    assert out1.patient.first_name == out2.patient.first_name
+    assert out1.patient.last_name == out2.patient.last_name
+    assert out1.patient.phone == out2.patient.phone
+    assert out1.patient.address == out2.patient.address
+    assert out1.patient.email == out2.patient.email
+    assert out1.patient.first_name != "Alice"
+    assert out1.patient.last_name != "Smith"

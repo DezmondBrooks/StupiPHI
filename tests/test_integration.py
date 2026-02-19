@@ -44,3 +44,12 @@ def test_residual_metrics_computed() -> None:
     assert hasattr(result, "residual_phone_count")
     assert isinstance(result.residual_email_count, int)
     assert isinstance(result.residual_phone_count, int)
+
+
+def test_audit_includes_structured_when_enabled() -> None:
+    """When structured detector is enabled, audit event lists 'structured' in detector_sources."""
+    cfg = PipelineConfig(hf_min_confidence=0.40, faker_seed=99, enable_structured=True)
+    pipeline = SanitizationPipeline(cfg)
+    labeled = generate_labeled_records(count=1, seed=222, difficulty="easy")
+    result = pipeline.sanitize_record(labeled[0].record)
+    assert "structured" in result.audit_event.detector_sources

@@ -28,6 +28,8 @@ def test_load_config_defaults() -> None:
         assert cfg.faker_seed == 99
         assert cfg.enable_hf is True
         assert cfg.enable_rule is True
+        assert cfg.enable_structured is True
+        assert cfg.pseudonym_salt is None
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -46,9 +48,24 @@ def test_load_config_custom_values() -> None:
         Path(path).unlink(missing_ok=True)
 
 
+def test_load_config_enable_structured_and_pseudonym_salt() -> None:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(
+            "detectors:\n  structured:\n    enabled: false\n"
+            "faker_seed: 1\npseudonym_salt: my-secret-salt\n"
+        )
+        path = f.name
+    try:
+        cfg = load_config(path)
+        assert cfg.enable_structured is False
+        assert cfg.pseudonym_salt == "my-secret-salt"
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 def test_pipeline_from_yaml() -> None:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write("detectors:\n  hf:\n    enabled: true\n    min_confidence: 0.35\n  rule:\n    enabled: true\nfaker_seed: 100\n")
+        f.write("detectors:\n  hf:\n    enabled: true\n    min_confidence: 0.35\n  rule:\n    enabled: true\n  structured:\n    enabled: true\nfaker_seed: 100\n")
         path = f.name
     try:
         pipeline = SanitizationPipeline.from_yaml(path)
@@ -56,5 +73,6 @@ def test_pipeline_from_yaml() -> None:
         assert pipeline.cfg.hf_min_confidence == 0.35
         assert pipeline.hf is not None
         assert pipeline.rules is not None
+        assert pipeline.structured is not None
     finally:
         Path(path).unlink(missing_ok=True)
