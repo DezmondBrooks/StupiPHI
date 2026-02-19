@@ -1,0 +1,20 @@
+# StupiPHI pipeline configuration (example).
+# Copy to config.yaml and adjust as needed.
+#
+# detectors:
+#   hf:       Hugging Face NER detector (encounter_notes).
+#   rule:     Rule-based detector (email, phone in encounter_notes).
+# faker_seed: Seed for deterministic pseudonymization (integer).
+# pseudonym_salt: Optional. When set, same original value -> same pseudonym across records.
+
+detectors:
+  hf:
+    enabled: true
+    min_confidence: 0.40
+  rule:
+    enabled: true
+  structured:
+    enabled: true   # patient.* fields (DOB, address, phone, email, name)
+
+faker_seed: 99
+# pseudonym_salt: "my-secret-salt"   # uncomment for stable cross-record mapping

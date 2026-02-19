@@ -14,7 +14,7 @@ EntityType = Literal[
     "UNKNOWN",
 ]
 
-DetectorSource = Literal["huggingface", "llm", "rule"]
+DetectorSource = Literal["huggingface", "llm", "rule", "structured"]
 
 
 @dataclass(frozen=True)

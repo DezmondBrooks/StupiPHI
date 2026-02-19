@@ -6,6 +6,7 @@ from typing import Dict, List
 from evals.labels import InjectedLabel
 from evals.labeled_dataset import LabeledRecord
 from models.canonical_record import CanonicalRecord
+from verification.verify import EMAIL_RE, PHONE_RE
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,15 @@ class EvalResult:
     false_negative_rate: float
     by_type_total: Dict[str, int]
     by_type_fn: Dict[str, int]
+    residual_email_count: int = 0
+    residual_phone_count: int = 0
+
+
+def _count_residual_patterns(records: List[CanonicalRecord]) -> tuple[int, int]:
+    """Return (number of records with ≥1 email pattern, number with ≥1 phone pattern)."""
+    email_count = sum(1 for r in records if EMAIL_RE.search(r.encounter_notes))
+    phone_count = sum(1 for r in records if PHONE_RE.search(r.encounter_notes))
+    return email_count, phone_count
 
 
 def _label_present_in_record(label: InjectedLabel, sanitized: CanonicalRecord) -> bool:
@@ -55,10 +65,14 @@ def evaluate_sanitization(
 
     rate = (fn / total) if total else 0.0
 
+    residual_email_count, residual_phone_count = _count_residual_patterns(sanitized_records)
+
     return EvalResult(
         total_labels=total,
         false_negatives=fn,
         false_negative_rate=rate,
         by_type_total=by_type_total,
         by_type_fn=by_type_fn,
+        residual_email_count=residual_email_count,
+        residual_phone_count=residual_phone_count,
     )
