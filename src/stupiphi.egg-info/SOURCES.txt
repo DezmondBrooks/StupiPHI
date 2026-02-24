@@ -14,6 +14,7 @@ tests/test_audit.py
 tests/test_case_transfer.py
 tests/test_case_transfer_integration.py
 tests/test_config.py
+tests/test_db_policy.py
 tests/test_integration.py
 tests/test_map_to_canonical.py
 tests/test_plan.py
