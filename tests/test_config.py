@@ -9,8 +9,8 @@ import pytest
 pytest.importorskip("transformers", reason="pipeline imports HF detector which needs transformers")
 pytest.importorskip("yaml", reason="PyYAML needed for config")
 
-from config.load import load_config
-from sanitizer.pipeline import SanitizationPipeline, PipelineConfig
+from stupiphi.config.load import load_config
+from stupiphi.sanitizer.pipeline import SanitizationPipeline, PipelineConfig
 
 
 def test_load_config_missing_file_raises() -> None:
@@ -30,6 +30,7 @@ def test_load_config_defaults() -> None:
         assert cfg.enable_rule is True
         assert cfg.enable_structured is True
         assert cfg.pseudonym_salt is None
+        assert cfg.database_policy is None
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -59,6 +60,31 @@ def test_load_config_enable_structured_and_pseudonym_salt() -> None:
         cfg = load_config(path)
         assert cfg.enable_structured is False
         assert cfg.pseudonym_salt == "my-secret-salt"
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_load_config_database_policy() -> None:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(
+            "faker_seed: 1\n"
+            "database_policy:\n"
+            "  tables:\n"
+            "    therapists:\n"
+            "      columns:\n"
+            "        first_name: pseudonymize\n"
+            "        email: redact\n"
+            "    payments:\n"
+            "      columns:\n"
+            "        last4: preserve\n"
+        )
+        path = f.name
+    try:
+        cfg = load_config(path)
+        assert cfg.database_policy is not None
+        assert cfg.database_policy["therapists"]["first_name"] == "pseudonymize"
+        assert cfg.database_policy["therapists"]["email"] == "redact"
+        assert cfg.database_policy["payments"]["last4"] == "preserve"
     finally:
         Path(path).unlink(missing_ok=True)
 

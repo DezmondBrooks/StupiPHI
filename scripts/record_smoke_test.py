@@ -1,4 +1,4 @@
-from models.canonical_record import CanonicalRecord, PatientInfo, Metadata
+from stupiphi.models.canonical_record import CanonicalRecord, PatientInfo, Metadata
 
 
 def main() -> None:

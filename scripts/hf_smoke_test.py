@@ -1,5 +1,5 @@
-from ingestion.synthetic_generator import generate_records
-from models.hf_runner import HFTokenClassifier
+from stupiphi.ingestion.synthetic_generator import generate_records
+from stupiphi.models.hf_runner import HFTokenClassifier
 
 
 def main() -> None:

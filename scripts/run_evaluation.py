@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from evals.labeled_dataset import generate_labeled_records
-from evals.metrics import evaluate_sanitization
-from sanitizer.pipeline import SanitizationPipeline, PipelineConfig
+from stupiphi.evals.labeled_dataset import generate_labeled_records
+from stupiphi.evals.metrics import evaluate_sanitization
+from stupiphi.sanitizer.pipeline import SanitizationPipeline, PipelineConfig
 
 
 def main() -> None:

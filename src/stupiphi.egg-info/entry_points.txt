@@ -1,0 +1,2 @@
+[console_scripts]
+stupiphi = stupiphi.cli:main

@@ -1,0 +1,209 @@
+"""Replay a sanitized case slice into the dev Postgres DB.
+
+V1 behavior:
+- Preserve original IDs from prod (patients, therapists, cases, payments, appointments).
+- Delete any existing rows for those IDs in dev within a single transaction.
+- Insert sanitized patient + appointments; therapists and payments may be transformed by database_policy.
+"""
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+from stupiphi.connectors.postgres import PostgresClient
+from stupiphi.sanitizer.pipeline import SanitizeResult
+from stupiphi.slice.apply_db_policy import apply_db_policy_to_row
+
+
+SliceDict = Dict[str, Any]
+
+
+def _extract_ids(original_slice: SliceDict) -> Dict[str, Any]:
+    patient_id = original_slice["patient_row"]["id"]
+    case_id = original_slice["case_row"]["id"]
+    appointments = original_slice.get("appointments_rows", []) or []
+    therapists = original_slice.get("therapist_rows", []) or []
+    payments = original_slice.get("payments_rows", []) or []
+
+    return {
+        "patient_id": patient_id,
+        "case_id": case_id,
+        "appointment_ids": [a["id"] for a in appointments],
+        "therapist_ids": [t["id"] for t in therapists],
+        "payment_ids": [p["id"] for p in payments],
+    }
+
+
+def _map_sanitized_by_appointment_id(sanitized_outputs: Sequence[SanitizeResult]) -> Dict[int, SanitizeResult]:
+    mapping: Dict[int, SanitizeResult] = {}
+    for res in sanitized_outputs:
+        rid = res.record.record_id
+        # Expect format: case:{case_id}:appt:{appt_id}
+        try:
+            parts = str(rid).split(":")
+            appt_id = int(parts[-1])
+        except Exception:
+            continue
+        mapping[appt_id] = res
+    return mapping
+
+
+def replay_case_slice(
+    case_id: int,
+    dev_client: PostgresClient,
+    sanitized_outputs: Sequence[SanitizeResult],
+    original_slice: SliceDict,
+    database_policy: Optional[Dict[str, Dict[str, str]]] = None,
+    pseudonym_salt: Optional[str] = None,
+) -> None:
+    """Replay a sanitized case slice into dev_db.
+
+    This function assumes:
+    - sanitized_outputs correspond to appointments in original_slice
+      (one SanitizeResult per appointment).
+    - All sanitized records share the same patient.
+
+    database_policy and pseudonym_salt: optional column-level policy for replay;
+    if None, all columns are preserved (current behavior).
+    """
+    ids = _extract_ids(original_slice)
+    patient_id = ids["patient_id"]
+    case_row = original_slice["case_row"]
+    appointments = original_slice.get("appointments_rows", []) or []
+    therapists = original_slice.get("therapist_rows", []) or []
+    payments = original_slice.get("payments_rows", []) or []
+
+    sanitized_by_appt = _map_sanitized_by_appointment_id(sanitized_outputs)
+
+    if not sanitized_outputs:
+        # Nothing to replay; no appointments for this case.
+        return
+
+    # Use patient from first sanitized record for all inserts.
+    sanitized_patient = sanitized_outputs[0].record.patient
+
+    with dev_client.transaction():
+        # Delete dependents first, then parents.
+        if ids["appointment_ids"]:
+            dev_client.execute(
+                "DELETE FROM appointments WHERE id = ANY(%s)",
+                (ids["appointment_ids"],),
+            )
+
+        if ids["payment_ids"]:
+            dev_client.execute(
+                "DELETE FROM payments WHERE id = ANY(%s)",
+                (ids["payment_ids"],),
+            )
+
+        dev_client.execute("DELETE FROM cases WHERE id = %s", (ids["case_id"],))
+
+        if ids["therapist_ids"]:
+            dev_client.execute(
+                "DELETE FROM therapists WHERE id = ANY(%s)",
+                (ids["therapist_ids"],),
+            )
+
+        dev_client.execute("DELETE FROM patients WHERE id = %s", (patient_id,))
+
+        # Build patient row and apply database_policy before insert.
+        patient_row = {
+            "id": patient_id,
+            "first_name": sanitized_patient.first_name,
+            "last_name": sanitized_patient.last_name,
+            "dob": sanitized_patient.dob,
+            "phone": sanitized_patient.phone,
+            "email": sanitized_patient.email,
+            "address": sanitized_patient.address,
+        }
+        patient_out = apply_db_policy_to_row("patients", patient_row, database_policy, pseudonym_salt)
+        dev_client.execute(
+            """
+            INSERT INTO patients (id, first_name, last_name, dob, phone, email, address)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                patient_out["id"],
+                patient_out["first_name"],
+                patient_out["last_name"],
+                patient_out["dob"],
+                patient_out["phone"],
+                patient_out["email"],
+                patient_out["address"],
+            ),
+        )
+
+        # Insert therapists (with database_policy if configured).
+        for t in therapists:
+            t_sanitized = apply_db_policy_to_row("therapists", dict(t), database_policy, pseudonym_salt)
+            dev_client.execute(
+                """
+                INSERT INTO therapists (id, first_name, last_name, email)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    t_sanitized["id"],
+                    t_sanitized["first_name"],
+                    t_sanitized["last_name"],
+                    t_sanitized.get("email"),
+                ),
+            )
+
+        # Insert case (policy applied if defined for cases table).
+        case_sanitized = apply_db_policy_to_row("cases", dict(case_row), database_policy, pseudonym_salt)
+        dev_client.execute(
+            """
+            INSERT INTO cases (id, patient_id, status, created_at)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                case_sanitized["id"],
+                case_sanitized["patient_id"],
+                case_sanitized["status"],
+                case_sanitized["created_at"],
+            ),
+        )
+
+        # Insert payments (with database_policy if configured).
+        for p in payments:
+            p_sanitized = apply_db_policy_to_row("payments", dict(p), database_policy, pseudonym_salt)
+            dev_client.execute(
+                """
+                INSERT INTO payments (id, patient_id, method, last4, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    p_sanitized["id"],
+                    p_sanitized["patient_id"],
+                    p_sanitized["method"],
+                    p_sanitized.get("last4"),
+                    p_sanitized["created_at"],
+                ),
+            )
+
+        # Insert appointments: notes from sanitized record; full row through policy.
+        for appt in appointments:
+            appt_id = appt["id"]
+            sanitized = sanitized_by_appt.get(appt_id)
+            notes = sanitized.record.encounter_notes if sanitized is not None else (appt.get("notes") or "")
+            appt_row = {
+                "id": appt_id,
+                "case_id": appt["case_id"],
+                "therapist_id": appt["therapist_id"],
+                "scheduled_at": appt["scheduled_at"],
+                "notes": notes,
+            }
+            appt_out = apply_db_policy_to_row("appointments", appt_row, database_policy, pseudonym_salt)
+            dev_client.execute(
+                """
+                INSERT INTO appointments (id, case_id, therapist_id, scheduled_at, notes)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    appt_out["id"],
+                    appt_out["case_id"],
+                    appt_out["therapist_id"],
+                    appt_out["scheduled_at"],
+                    appt_out["notes"],
+                ),
+            )
+

@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import pytest
 
-from transformation.apply import (
+from stupiphi.transformation.apply import (
     _apply_span_redactions,
     apply_plan,
     REDACTION_TOKEN,
 )
-from transformation.plan import PlanAction, TransformationPlan
-from models.canonical_record import CanonicalRecord, PatientInfo, Metadata
+from stupiphi.transformation.plan import PlanAction, TransformationPlan
+from stupiphi.models.canonical_record import CanonicalRecord, PatientInfo, Metadata
 
 
 def test_apply_span_redactions_single() -> None:

@@ -1,0 +1,40 @@
+# StupiPHI pipeline configuration (example).
+# Copy to config.yaml and adjust as needed.
+#
+# detectors:
+#   hf:       Hugging Face NER detector (encounter_notes).
+#   rule:     Rule-based detector (email, phone in encounter_notes).
+# faker_seed: Seed for deterministic pseudonymization (integer).
+# pseudonym_salt: Optional. When set, same original value -> same pseudonym across records.
+#
+# database_policy: Column-level sanitization during replay into dev DB (separate from
+#   free-text detection/redaction). If omitted, all columns are preserved (current behavior).
+#   Actions per column: preserve, redact, pseudonymize, mask.
+
+detectors:
+  hf:
+    enabled: true
+    min_confidence: 0.40
+  rule:
+    enabled: true
+  structured:
+    enabled: true   # patient.* fields (DOB, address, phone, email, name)
+
+faker_seed: 99
+# pseudonym_salt: "my-secret-salt"   # uncomment for stable cross-record mapping
+
+# database_policy:
+#   tables:
+#     therapists:
+#       columns:
+#         first_name: pseudonymize
+#         last_name: pseudonymize
+#         email: pseudonymize
+#     payments:
+#       columns:
+#         last4: preserve
+#     patients:
+#       columns:
+#         phone: pseudonymize
+#         email: pseudonymize
+#         address: pseudonymize

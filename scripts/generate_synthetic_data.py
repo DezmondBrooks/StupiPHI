@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ingestion.synthetic_generator import generate_to_file
+from stupiphi.ingestion.synthetic_generator import generate_to_file
 
 
 def main() -> None:

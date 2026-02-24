@@ -1,8 +1,8 @@
 """Unit tests for structured-field detector."""
 from __future__ import annotations
 
-from models.canonical_record import CanonicalRecord, PatientInfo, Metadata
-from detection.structured_detector import StructuredFieldDetector
+from stupiphi.models.canonical_record import CanonicalRecord, PatientInfo, Metadata
+from stupiphi.detection.structured_detector import StructuredFieldDetector
 
 
 def _record(

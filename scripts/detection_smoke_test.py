@@ -1,5 +1,5 @@
-from ingestion.synthetic_generator import generate_records
-from detection.hf_detector import HFDetector
+from stupiphi.ingestion.synthetic_generator import generate_records
+from stupiphi.detection.hf_detector import HFDetector
 
 
 def main() -> None:

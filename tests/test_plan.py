@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from detection.detector_base import Finding
-from transformation.plan import build_conservative_plan, PlanAction, TransformationPlan
+from stupiphi.detection.detector_base import Finding
+from stupiphi.transformation.plan import build_conservative_plan, PlanAction, TransformationPlan
 
 
 def test_build_conservative_plan_empty_findings() -> None:

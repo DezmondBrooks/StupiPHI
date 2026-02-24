@@ -1,8 +1,8 @@
 import json
 
-from ingestion.synthetic_generator import generate_records
-from sanitizer.pipeline import SanitizationPipeline, PipelineConfig
-from audit.audit_log import to_dict
+from stupiphi.ingestion.synthetic_generator import generate_records
+from stupiphi.sanitizer.pipeline import SanitizationPipeline, PipelineConfig
+from stupiphi.audit.audit_log import to_dict
 
 
 def main() -> None:

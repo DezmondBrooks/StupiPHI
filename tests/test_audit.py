@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-from detection.detector_base import Finding
-from transformation.plan import TransformationPlan, PlanAction
-from audit.audit_log import build_audit_event, to_dict, AuditEvent
+from stupiphi.detection.detector_base import Finding
+from stupiphi.transformation.plan import TransformationPlan, PlanAction
+from stupiphi.audit.audit_log import build_audit_event, to_dict, AuditEvent
 
 
 def test_build_audit_event() -> None:

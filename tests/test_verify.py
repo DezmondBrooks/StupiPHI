@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from models.canonical_record import CanonicalRecord, PatientInfo, Metadata
-from verification.verify import verify_basic
+from stupiphi.models.canonical_record import CanonicalRecord, PatientInfo, Metadata
+from stupiphi.verification.verify import verify_basic
 
 
 def _record(notes: str) -> CanonicalRecord:
