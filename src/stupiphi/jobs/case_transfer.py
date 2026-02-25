@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -12,10 +12,18 @@ from stupiphi.slice.extract_case_slice import extract_case_slice
 from stupiphi.slice.map_to_canonical import case_slice_to_canonical_records
 from stupiphi.slice.replay_case_slice import replay_case_slice
 from stupiphi.sanitizer.pipeline import PipelineConfig, SanitizationPipeline, SanitizeResult
+from stupiphi.verification.db_verify import DEFAULT_TABLES, verify_dev_db
 
 
 class VerificationFailedError(Exception):
     """Raised when --fail-on-verification is set and one or more records failed verification.
+
+    Message is safe (counts only, no PHI).
+    """
+
+
+class DBVerificationFailedError(Exception):
+    """Raised when --fail-on-db-verify is set and dev DB verification found residual patterns.
 
     Message is safe (counts only, no PHI).
     """
@@ -37,6 +45,10 @@ class TransferReport:
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     config_path: Optional[str] = None  # safe: path only, no contents
+    db_verification_ok: bool = True
+    db_findings_count: int = 0
+    db_findings_by_table: Dict[str, int] = field(default_factory=dict)
+    db_findings_by_column: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, object]:
         """JSON-serializable dict; no PHI. Datetimes as ISO strings."""
@@ -84,12 +96,15 @@ def run_case_transfer(
     report_out: Optional[str] = None,
     audit_out: Optional[str] = None,
     fail_on_verification: bool = False,
+    verify_dev: bool = True,
+    fail_on_db_verify: bool = False,
 ) -> TransferReport:
-    """Run extract → sanitize → [replay unless dry_run or verification gating].
+    """Run extract → sanitize → [replay unless dry_run or verification gating] → [verify dev DB if verify_dev].
 
     Does not log or return raw PHI. When fail_on_verification is True and
     any record fails verification, raises VerificationFailedError after
-    optionally writing report/audit artifacts.
+    optionally writing report/audit artifacts. When fail_on_db_verify is True
+    and dev DB verification finds patterns, raises DBVerificationFailedError.
     """
     started_at = _now_iso()
     if config_path:
@@ -128,6 +143,10 @@ def run_case_transfer(
                 started_at=started_at,
                 finished_at=_now_iso(),
                 config_path=config_path,
+                db_verification_ok=True,
+                db_findings_count=0,
+                db_findings_by_table={},
+                db_findings_by_column={},
             )
             if report_out:
                 _write_report(report, report_out)
@@ -150,6 +169,10 @@ def run_case_transfer(
                 started_at=started_at,
                 finished_at=_now_iso(),
                 config_path=config_path,
+                db_verification_ok=True,
+                db_findings_count=0,
+                db_findings_by_table={},
+                db_findings_by_column={},
             )
             if report_out:
                 _write_report(report, report_out)
@@ -166,6 +189,41 @@ def run_case_transfer(
             pseudonym_salt=pipeline.cfg.pseudonym_salt,
         )
 
+        db_ok = True
+        db_findings_count = 0
+        db_findings_by_table: Dict[str, int] = {}
+        db_findings_by_column: Dict[str, int] = {}
+        if verify_dev:
+            db_result = verify_dev_db(dev_client, tables=DEFAULT_TABLES)
+            db_ok = db_result.ok
+            db_findings_count = db_result.findings_count
+            db_findings_by_table = db_result.findings_by_table
+            db_findings_by_column = db_result.findings_by_column
+            if fail_on_db_verify and not db_ok:
+                report = TransferReport(
+                    case_id=case_id,
+                    rows_extracted=rows_extracted,
+                    rows_inserted=dict(rows_extracted),
+                    verification_failures=verification_failures,
+                    audit_events=len(sanitized_results),
+                    replay_skipped=False,
+                    replay_skip_reason=None,
+                    started_at=started_at,
+                    finished_at=_now_iso(),
+                    config_path=config_path,
+                    db_verification_ok=db_ok,
+                    db_findings_count=db_findings_count,
+                    db_findings_by_table=db_findings_by_table,
+                    db_findings_by_column=db_findings_by_column,
+                )
+                if report_out:
+                    _write_report(report, report_out)
+                if audit_out:
+                    _write_audit_jsonl(sanitized_results, audit_out)
+                raise DBVerificationFailedError(
+                    f"DB verification found {db_findings_count} finding(s) in dev DB; failing."
+                )
+
         report = TransferReport(
             case_id=case_id,
             rows_extracted=rows_extracted,
@@ -177,6 +235,10 @@ def run_case_transfer(
             started_at=started_at,
             finished_at=_now_iso(),
             config_path=config_path,
+            db_verification_ok=db_ok,
+            db_findings_count=db_findings_count,
+            db_findings_by_table=db_findings_by_table,
+            db_findings_by_column=db_findings_by_column,
         )
         if report_out:
             _write_report(report, report_out)

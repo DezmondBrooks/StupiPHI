@@ -136,6 +136,10 @@ ALLOWED_REPORT_KEYS = {
     "started_at",
     "finished_at",
     "config_path",
+    "db_verification_ok",
+    "db_findings_count",
+    "db_findings_by_table",
+    "db_findings_by_column",
 }
 
 

@@ -10,7 +10,11 @@ from stupiphi.evals.metrics import evaluate_sanitization
 from stupiphi.ingestion.synthetic_generator import generate_records
 from stupiphi.sanitizer.pipeline import SanitizationPipeline, PipelineConfig
 from stupiphi.audit.audit_log import to_dict
-from stupiphi.jobs.case_transfer import run_case_transfer, VerificationFailedError
+from stupiphi.jobs.case_transfer import (
+    run_case_transfer,
+    VerificationFailedError,
+    DBVerificationFailedError,
+)
 
 
 def _run_eval(args: argparse.Namespace) -> None:
@@ -75,8 +79,17 @@ def _transfer_case(args: argparse.Namespace) -> None:
             report_out=args.report_out,
             audit_out=args.audit_out,
             fail_on_verification=args.fail_on_verification,
+            verify_dev=args.verify_dev,
+            fail_on_db_verify=args.fail_on_db_verify,
         )
     except VerificationFailedError as e:
+        print(str(e))
+        if args.report_out:
+            print(f"Report written to: {args.report_out}")
+        if args.audit_out:
+            print(f"Audit written to: {args.audit_out}")
+        raise SystemExit(1)
+    except DBVerificationFailedError as e:
         print(str(e))
         if args.report_out:
             print(f"Report written to: {args.report_out}")
@@ -96,6 +109,13 @@ def _transfer_case(args: argparse.Namespace) -> None:
     print(f"Audit events: {report.audit_events}")
     if report.replay_skipped and report.replay_skip_reason:
         print(f"Replay skipped: {report.replay_skip_reason}")
+    if report.db_verification_ok:
+        print("DB verification: ok")
+    else:
+        print(f"DB verification: FAILED ({report.db_findings_count} finding(s))")
+        if report.db_findings_by_table:
+            parts = [f"{t}={c}" for t, c in report.db_findings_by_table.items()]
+            print(f"Findings by table: {', '.join(parts)}")
     if args.report_out:
         print(f"Report written to: {args.report_out}")
     if args.audit_out:
@@ -140,6 +160,23 @@ def main() -> None:
         "--fail-on-verification",
         action="store_true",
         help="Abort before replay if any sanitized record fails verification",
+    )
+    transfer_parser.add_argument(
+        "--verify-dev",
+        action="store_true",
+        default=True,
+        help="Run DB verification on dev after replay (default: on)",
+    )
+    transfer_parser.add_argument(
+        "--no-verify-dev",
+        action="store_false",
+        dest="verify_dev",
+        help="Skip DB verification on dev after replay",
+    )
+    transfer_parser.add_argument(
+        "--fail-on-db-verify",
+        action="store_true",
+        help="Exit non-zero if DB verification finds residual email/phone patterns in dev",
     )
     transfer_parser.set_defaults(func=_transfer_case)
 
