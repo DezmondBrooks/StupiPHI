@@ -9,7 +9,7 @@ from stupiphi.evals.labeled_dataset import generate_labeled_records
 from stupiphi.evals.metrics import evaluate_sanitization
 from stupiphi.ingestion.synthetic_generator import generate_records
 from stupiphi.sanitizer.pipeline import SanitizationPipeline, PipelineConfig
-from stupiphi.audit.audit_log import to_dict
+from stupiphi.audit.audit_log import to_dict, file_audit_sink
 from stupiphi.jobs.case_transfer import (
     run_case_transfer,
     VerificationFailedError,
@@ -71,13 +71,17 @@ def _sanitize(args: argparse.Namespace) -> None:
 
 
 def _transfer_case(args: argparse.Namespace) -> None:
+    audit_sink = None
+    if args.audit_out:
+        Path(args.audit_out).open("w").close()  # fresh file per run
+        audit_sink = file_audit_sink(args.audit_out)
     try:
         report = run_case_transfer(
             case_id=args.case_id,
             config_path=args.config,
             dry_run=args.dry_run,
             report_out=args.report_out,
-            audit_out=args.audit_out,
+            audit_sink=audit_sink,
             fail_on_verification=args.fail_on_verification,
             verify_dev=args.verify_dev,
             fail_on_db_verify=args.fail_on_db_verify,

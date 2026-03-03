@@ -22,6 +22,9 @@ class PlanAction:
     # For structured field replacement
     replacement: Optional[str] = None
 
+    # For audit: which entity type triggered this action (no raw PHI)
+    entity_type: Optional[str] = None
+
 
 @dataclass(frozen=True)
 class TransformationPlan:
@@ -46,6 +49,7 @@ def build_conservative_plan(record_id: str, findings: List[Finding]) -> Transfor
                     start=f.start,
                     end=f.end,
                     reason=f"redact detected entity_type={f.entity_type} source={f.detector_source}",
+                    entity_type=str(f.entity_type),
                 )
             )
 

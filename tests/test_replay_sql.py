@@ -36,6 +36,10 @@ class FakeClient(PostgresClient):
     def execute(self, query, params=None):  # type: ignore[override]
         self.calls.append((query.strip(), params))
 
+    def fetch_one(self, query, params=None):  # type: ignore[override]
+        # Simulate empty tables so MAX(id) returns NULL/0.
+        return {"max_id": 0}
+
     def transaction(self):  # type: ignore[override]
         class _Tx:
             def __init__(self, outer: FakeClient) -> None:

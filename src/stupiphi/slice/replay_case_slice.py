@@ -1,9 +1,10 @@
 """Replay a sanitized case slice into the dev Postgres DB.
 
-V1 behavior:
-- Preserve original IDs from prod (patients, therapists, cases, payments, appointments).
-- Delete any existing rows for those IDs in dev within a single transaction.
-- Insert sanitized patient + appointments; therapists and payments may be transformed by database_policy.
+Behavior:
+- Delete any existing rows for the original prod IDs in dev within a single transaction.
+- Allocate new dev-only IDs for patients, therapists, cases, payments, appointments.
+- Rewrite foreign keys in the slice to use the new IDs.
+- Insert sanitized rows; therapists and payments may be transformed by database_policy.
 """
 from __future__ import annotations
 
@@ -47,6 +48,18 @@ def _map_sanitized_by_appointment_id(sanitized_outputs: Sequence[SanitizeResult]
     return mapping
 
 
+def _next_id_for_table(dev_client: PostgresClient, table_name: str) -> int:
+    """Return the next integer ID to use for a table based on MAX(id)."""
+    row = dev_client.fetch_one(f"SELECT MAX(id) AS max_id FROM {table_name}")
+    max_id = 0
+    if row and row.get("max_id") is not None:
+        try:
+            max_id = int(row["max_id"])
+        except (TypeError, ValueError):
+            max_id = 0
+    return max_id + 1
+
+
 def replay_case_slice(
     case_id: int,
     dev_client: PostgresClient,
@@ -54,6 +67,7 @@ def replay_case_slice(
     original_slice: SliceDict,
     database_policy: Optional[Dict[str, Dict[str, str]]] = None,
     pseudonym_salt: Optional[str] = None,
+    placeholders: Optional[Dict[str, str]] = None,
 ) -> None:
     """Replay a sanitized case slice into dev_db.
 
@@ -64,6 +78,7 @@ def replay_case_slice(
 
     database_policy and pseudonym_salt: optional column-level policy for replay;
     if None, all columns are preserved (current behavior).
+    placeholders: optional map for action "placeholder" (e.g. users.password_hash -> dev hash).
     """
     ids = _extract_ids(original_slice)
     patient_id = ids["patient_id"]
@@ -82,7 +97,7 @@ def replay_case_slice(
     sanitized_patient = sanitized_outputs[0].record.patient
 
     with dev_client.transaction():
-        # Delete dependents first, then parents.
+        # Delete dependents first, then parents based on original prod IDs.
         if ids["appointment_ids"]:
             dev_client.execute(
                 "DELETE FROM appointments WHERE id = ANY(%s)",
@@ -105,9 +120,35 @@ def replay_case_slice(
 
         dev_client.execute("DELETE FROM patients WHERE id = %s", (patient_id,))
 
-        # Build patient row and apply database_policy before insert.
+        # Allocate new dev-only IDs per table to avoid reusing prod IDs.
+        new_patient_id = _next_id_for_table(dev_client, "patients")
+
+        therapist_id_map: Dict[int, int] = {}
+        if ids["therapist_ids"]:
+            next_tid = _next_id_for_table(dev_client, "therapists")
+            for old_tid in ids["therapist_ids"]:
+                therapist_id_map[old_tid] = next_tid
+                next_tid += 1
+
+        new_case_id = _next_id_for_table(dev_client, "cases")
+
+        payment_id_map: Dict[int, int] = {}
+        if ids["payment_ids"]:
+            next_pid = _next_id_for_table(dev_client, "payments")
+            for old_pid in ids["payment_ids"]:
+                payment_id_map[old_pid] = next_pid
+                next_pid += 1
+
+        appointment_id_map: Dict[int, int] = {}
+        if ids["appointment_ids"]:
+            next_aid = _next_id_for_table(dev_client, "appointments")
+            for old_aid in ids["appointment_ids"]:
+                appointment_id_map[old_aid] = next_aid
+                next_aid += 1
+
+        # Build patient row with new ID and apply database_policy before insert.
         patient_row = {
-            "id": patient_id,
+            "id": new_patient_id,
             "first_name": sanitized_patient.first_name,
             "last_name": sanitized_patient.last_name,
             "dob": sanitized_patient.dob,
@@ -115,7 +156,7 @@ def replay_case_slice(
             "email": sanitized_patient.email,
             "address": sanitized_patient.address,
         }
-        patient_out = apply_db_policy_to_row("patients", patient_row, database_policy, pseudonym_salt)
+        patient_out = apply_db_policy_to_row("patients", patient_row, database_policy, pseudonym_salt, placeholders=placeholders)
         dev_client.execute(
             """
             INSERT INTO patients (id, first_name, last_name, dob, phone, email, address)
@@ -134,7 +175,11 @@ def replay_case_slice(
 
         # Insert therapists (with database_policy if configured).
         for t in therapists:
-            t_sanitized = apply_db_policy_to_row("therapists", dict(t), database_policy, pseudonym_salt)
+            old_tid = t["id"]
+            new_tid = therapist_id_map.get(old_tid, old_tid)
+            t_row = dict(t)
+            t_row["id"] = new_tid
+            t_sanitized = apply_db_policy_to_row("therapists", t_row, database_policy, pseudonym_salt, placeholders=placeholders)
             dev_client.execute(
                 """
                 INSERT INTO therapists (id, first_name, last_name, email)
@@ -149,7 +194,10 @@ def replay_case_slice(
             )
 
         # Insert case (policy applied if defined for cases table).
-        case_sanitized = apply_db_policy_to_row("cases", dict(case_row), database_policy, pseudonym_salt)
+        case_row_copy = dict(case_row)
+        case_row_copy["id"] = new_case_id
+        case_row_copy["patient_id"] = new_patient_id
+        case_sanitized = apply_db_policy_to_row("cases", case_row_copy, database_policy, pseudonym_salt, placeholders=placeholders)
         dev_client.execute(
             """
             INSERT INTO cases (id, patient_id, status, created_at)
@@ -165,7 +213,13 @@ def replay_case_slice(
 
         # Insert payments (with database_policy if configured).
         for p in payments:
-            p_sanitized = apply_db_policy_to_row("payments", dict(p), database_policy, pseudonym_salt)
+            old_pid = p["id"]
+            new_pid = payment_id_map.get(old_pid, old_pid)
+            p_row = dict(p)
+            p_row["id"] = new_pid
+            # patient_id in payments should point to the new patient ID.
+            p_row["patient_id"] = new_patient_id
+            p_sanitized = apply_db_policy_to_row("payments", p_row, database_policy, pseudonym_salt, placeholders=placeholders)
             dev_client.execute(
                 """
                 INSERT INTO payments (id, patient_id, method, last4, created_at)
@@ -185,14 +239,17 @@ def replay_case_slice(
             appt_id = appt["id"]
             sanitized = sanitized_by_appt.get(appt_id)
             notes = sanitized.record.encounter_notes if sanitized is not None else (appt.get("notes") or "")
+            new_appt_id = appointment_id_map.get(appt_id, appt_id)
+            new_case_ref = new_case_id
+            new_therapist_ref = therapist_id_map.get(appt["therapist_id"], appt["therapist_id"])
             appt_row = {
-                "id": appt_id,
-                "case_id": appt["case_id"],
-                "therapist_id": appt["therapist_id"],
+                "id": new_appt_id,
+                "case_id": new_case_ref,
+                "therapist_id": new_therapist_ref,
                 "scheduled_at": appt["scheduled_at"],
                 "notes": notes,
             }
-            appt_out = apply_db_policy_to_row("appointments", appt_row, database_policy, pseudonym_salt)
+            appt_out = apply_db_policy_to_row("appointments", appt_row, database_policy, pseudonym_salt, placeholders=placeholders)
             dev_client.execute(
                 """
                 INSERT INTO appointments (id, case_id, therapist_id, scheduled_at, notes)

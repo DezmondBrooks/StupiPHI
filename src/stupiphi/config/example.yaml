@@ -9,7 +9,7 @@
 #
 # database_policy: Column-level sanitization during replay into dev DB (separate from
 #   free-text detection/redaction). If omitted, all columns are preserved (current behavior).
-#   Actions per column: preserve, redact, pseudonymize, mask.
+#   Actions per column: preserve, redact, pseudonymize, mask, placeholder (see README edge cases).
 
 detectors:
   hf:
@@ -24,6 +24,8 @@ faker_seed: 99
 # pseudonym_salt: "my-secret-salt"   # uncomment for stable cross-record mapping
 
 # database_policy:
+#   placeholders:   # optional: for action "placeholder" (e.g. dev password hash)
+#     users.password_hash: "$2b$12$..."   # e.g. bcrypt hash of "devpassword"
 #   tables:
 #     therapists:
 #       columns:
@@ -38,3 +40,7 @@ faker_seed: 99
 #         phone: pseudonymize
 #         email: pseudonymize
 #         address: pseudonymize
+#     users:        # when slice includes users table: never preserve prod credentials
+#       columns:
+#         username: pseudonymize
+#         password_hash: placeholder   # use redact or placeholder; never preserve

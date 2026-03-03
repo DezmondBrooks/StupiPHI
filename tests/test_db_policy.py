@@ -114,3 +114,31 @@ def test_pseudonymize_no_salt_redacted() -> None:
     row = {"id": 1, "email": "a@b.com"}
     out = apply_db_policy_to_row("therapists", row, policy, None)
     assert out["email"] == REDACTED
+
+
+def test_placeholder_with_configured_value() -> None:
+    """Placeholder action with matching key in placeholders -> configured value; row value never used."""
+    policy = {"users": {"password_hash": "placeholder"}}
+    row = {"id": 1, "username": "admin", "password_hash": "$2b$12$realhash"}
+    placeholders = {"users.password_hash": "$2b$12$devplaceholder"}
+    out = apply_db_policy_to_row("users", row, policy, None, placeholders=placeholders)
+    assert out["password_hash"] == "$2b$12$devplaceholder"
+    assert out["username"] == "admin"
+    assert out["id"] == 1
+
+
+def test_placeholder_no_key_redacted() -> None:
+    """Placeholder action but no entry for table.column -> REDACTED."""
+    policy = {"users": {"password_hash": "placeholder"}}
+    row = {"id": 1, "password_hash": "$2b$12$secret"}
+    placeholders = {"users.other_col": "x"}
+    out = apply_db_policy_to_row("users", row, policy, None, placeholders=placeholders)
+    assert out["password_hash"] == REDACTED
+
+
+def test_placeholder_none_map_redacted() -> None:
+    """Placeholder action with placeholders=None -> REDACTED (row value never used)."""
+    policy = {"users": {"password_hash": "placeholder"}}
+    row = {"id": 1, "password_hash": "$2b$12$secret"}
+    out = apply_db_policy_to_row("users", row, policy, None, placeholders=None)
+    assert out["password_hash"] == REDACTED

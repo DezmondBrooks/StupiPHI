@@ -1,4 +1,4 @@
-"""Unit tests for case transfer job: dry-run, fail-on-verification, report-out, audit-out."""
+"""Unit tests for case transfer job: dry-run, fail-on-verification, report-out, audit_sink."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("psycopg", reason="psycopg required to import case_transfer")
 
-from stupiphi.audit.audit_log import AuditEvent
+from stupiphi.audit.audit_log import AuditEvent, file_audit_sink
 from stupiphi.jobs.case_transfer import (
     VerificationFailedError,
     run_case_transfer,
@@ -89,7 +89,9 @@ def test_dry_run_does_not_call_replay(
     mock_dev.return_value = FakeClient()
     mock_extract.return_value = _minimal_slice()
     mock_map.return_value = [_one_record()]
-    with patch("stupiphi.jobs.case_transfer.SanitizationPipeline") as MockPipeline:
+    with patch("stupiphi.jobs.case_transfer.SanitizationPipeline") as MockPipeline, patch.dict(
+        "os.environ", {"STUPIPHI_ALLOW_PROD_TO_DEV": "true"}
+    ):
         MockPipeline.return_value.sanitize_record.return_value = _sanitize_result(True)
 
         run_case_transfer(case_id=1, dry_run=True)
@@ -113,7 +115,9 @@ def test_fail_on_verification_prevents_replay(
     mock_dev.return_value = FakeClient()
     mock_extract.return_value = _minimal_slice()
     mock_map.return_value = [_one_record()]
-    with patch("stupiphi.jobs.case_transfer.SanitizationPipeline") as MockPipeline:
+    with patch("stupiphi.jobs.case_transfer.SanitizationPipeline") as MockPipeline, patch.dict(
+        "os.environ", {"STUPIPHI_ALLOW_PROD_TO_DEV": "true"}
+    ):
         MockPipeline.return_value.sanitize_record.return_value = _sanitize_result(
             False, ["encounter_notes still contains an email-like pattern"]
         )
@@ -161,7 +165,9 @@ def test_report_out_writes_valid_json_no_sensitive_fields(
     mock_dev.return_value = FakeClient()
     mock_extract.return_value = _minimal_slice()
     mock_map.return_value = [_one_record()]
-    with patch("stupiphi.jobs.case_transfer.SanitizationPipeline") as MockPipeline:
+    with patch("stupiphi.jobs.case_transfer.SanitizationPipeline") as MockPipeline, patch.dict(
+        "os.environ", {"STUPIPHI_ALLOW_PROD_TO_DEV": "true"}
+    ):
         MockPipeline.return_value.sanitize_record.return_value = _sanitize_result(True)
 
         run_case_transfer(case_id=1, dry_run=True, report_out=str(report_path))
@@ -188,7 +194,7 @@ PHONE_PATTERN = re.compile(r"\d{3}[-.\s]?\d{3}[-.\s]?\d{4}")
 @patch("stupiphi.jobs.case_transfer.extract_case_slice")
 @patch("stupiphi.jobs.case_transfer.get_dev_client")
 @patch("stupiphi.jobs.case_transfer.get_prod_client")
-def test_audit_out_writes_jsonl_no_phi(
+def test_audit_sink_writes_jsonl_no_phi(
     mock_prod: MagicMock,
     mock_dev: MagicMock,
     mock_extract: MagicMock,
@@ -201,12 +207,29 @@ def test_audit_out_writes_jsonl_no_phi(
     mock_dev.return_value = FakeClient()
     mock_extract.return_value = _minimal_slice()
     mock_map.return_value = [_one_record()]
-    with patch("stupiphi.jobs.case_transfer.SanitizationPipeline") as MockPipeline:
-        MockPipeline.return_value.sanitize_record.return_value = _sanitize_result(
-            True
-        )
+    with patch("stupiphi.jobs.case_transfer.SanitizationPipeline") as MockPipeline, patch.dict(
+        "os.environ", {"STUPIPHI_ALLOW_PROD_TO_DEV": "true"}
+    ):
+        result = _sanitize_result(True)
 
-        run_case_transfer(case_id=1, dry_run=True, audit_out=str(audit_path))
+        def _sanitize_side_effect(rec, audit_sink=None):
+            if audit_sink is not None:
+                payload = {
+                    "record_id": result.record.record_id,
+                    "detector_sources": [],
+                    "finding_counts": {},
+                    "action_counts": {},
+                    "notes": "Applied 0 redactions.",
+                    "verification_ok": result.verification_ok,
+                    "verification_issues": list(result.verification_issues),
+                    "modifications": [],
+                }
+                audit_sink(payload)
+            return result
+
+        MockPipeline.return_value.sanitize_record.side_effect = _sanitize_side_effect
+
+        run_case_transfer(case_id=1, dry_run=True, audit_sink=file_audit_sink(str(audit_path)))
 
     lines = audit_path.read_text(encoding="utf-8").strip().split("\n")
     assert len(lines) >= 1
@@ -221,6 +244,7 @@ def test_audit_out_writes_jsonl_no_phi(
         assert "record_id" in obj
         assert "verification_ok" in obj
         assert "verification_issues" in obj
+        assert "modifications" in obj
 
 
 def test_transfer_report_to_dict_serializable() -> None:

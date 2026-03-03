@@ -53,3 +53,25 @@ def test_audit_includes_structured_when_enabled() -> None:
     labeled = generate_labeled_records(count=1, seed=222, difficulty="easy")
     result = pipeline.sanitize_record(labeled[0].record)
     assert "structured" in result.audit_event.detector_sources
+
+
+def test_audit_sink_receives_extended_payload() -> None:
+    """When audit_sink is provided, it is called with payload containing modifications, verification_ok, verification_issues."""
+    cfg = PipelineConfig(hf_min_confidence=0.40, faker_seed=99)
+    pipeline = SanitizationPipeline(cfg)
+    labeled = generate_labeled_records(count=1, seed=333, difficulty="easy")
+    payloads = []
+
+    def collect(payload):
+        payloads.append(payload)
+
+    result = pipeline.sanitize_record(labeled[0].record, audit_sink=collect)
+    assert len(payloads) == 1
+    p = payloads[0]
+    assert p["record_id"] == result.record.record_id
+    assert "verification_ok" in p
+    assert p["verification_ok"] == result.verification_ok
+    assert "verification_issues" in p
+    assert p["verification_issues"] == result.verification_issues
+    assert "modifications" in p
+    assert isinstance(p["modifications"], list)

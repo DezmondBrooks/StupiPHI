@@ -77,6 +77,10 @@ def test_load_config_database_policy() -> None:
             "    payments:\n"
             "      columns:\n"
             "        last4: preserve\n"
+            "    users:\n"
+            "      columns:\n"
+            "        password_hash: preserve\n"
+            "        ssn: preserve\n"
         )
         path = f.name
     try:
@@ -84,7 +88,35 @@ def test_load_config_database_policy() -> None:
         assert cfg.database_policy is not None
         assert cfg.database_policy["therapists"]["first_name"] == "pseudonymize"
         assert cfg.database_policy["therapists"]["email"] == "redact"
+        # Non-sensitive column name can still be preserved.
         assert cfg.database_policy["payments"]["last4"] == "preserve"
+        assert getattr(cfg, "database_policy_placeholders", None) is None
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_load_config_database_policy_placeholders() -> None:
+    """database_policy.placeholders is parsed into database_policy_placeholders (table.column -> value)."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(
+            "faker_seed: 1\n"
+            "database_policy:\n"
+            "  placeholders:\n"
+            "    users.password_hash: \"$2b$12$devhash\"\n"
+            "  tables:\n"
+            "    users:\n"
+            "      columns:\n"
+            "        username: pseudonymize\n"
+            "        password_hash: placeholder\n"
+        )
+        path = f.name
+    try:
+        cfg = load_config(path)
+        assert getattr(cfg, "database_policy_placeholders", None) is not None
+        assert cfg.database_policy_placeholders["users.password_hash"] == "$2b$12$devhash"
+        # Placeholder action remains, but dangerous column can never be preserved.
+        assert cfg.database_policy["users"]["password_hash"] == "placeholder"
+        assert cfg.database_policy["users"]["username"] == "pseudonymize"
     finally:
         Path(path).unlink(missing_ok=True)
 

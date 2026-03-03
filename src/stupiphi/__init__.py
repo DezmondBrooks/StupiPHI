@@ -6,7 +6,13 @@ Single namespace for pipeline, config, verification, and audit.
 from stupiphi.models.canonical_record import CanonicalRecord, PatientInfo, Metadata
 from stupiphi.detection.detector_base import Finding, EntityType
 from stupiphi.evals.metrics import EvalResult, evaluate_sanitization
-from stupiphi.audit.audit_log import build_audit_event, AuditEvent, to_dict
+from stupiphi.audit.audit_log import (
+    build_audit_event,
+    AuditEvent,
+    to_dict,
+    to_audit_payload,
+    file_audit_sink,
+)
 from stupiphi.verification.verify import verify_basic
 
 try:
@@ -36,5 +42,7 @@ __all__ = [
     "build_audit_event",
     "AuditEvent",
     "to_dict",
+    "to_audit_payload",
+    "file_audit_sink",
     "verify_basic",
 ]

@@ -34,14 +34,17 @@ def apply_db_policy_to_row(
     row: Dict[str, Any],
     policy_config: Optional[Dict[str, Dict[str, str]]],
     pseudonym_salt: Optional[str],
+    placeholders: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Apply database_policy to a single row. Returns a new dict; does not mutate row.
 
-    policy_config: { table_name: { column_name: "preserve"|"redact"|"pseudonymize"|"mask" } }.
+    policy_config: { table_name: { column_name: "preserve"|"redact"|"pseudonymize"|"mask"|"placeholder" } }.
     If None or table/column not defined, action is preserve.
+    placeholders: For action "placeholder", { "table.column": value }. Row value is never used; if no placeholder, REDACTED.
     """
     table_policy = (policy_config or {}).get(table_name) or {}
+    placeholders_map = placeholders or {}
     out: Dict[str, Any] = {}
 
     for col, value in row.items():
@@ -50,6 +53,9 @@ def apply_db_policy_to_row(
             out[col] = value
         elif action == "redact":
             out[col] = REDACTED
+        elif action == "placeholder":
+            key = f"{table_name}.{col}"
+            out[col] = placeholders_map.get(key, REDACTED)
         elif action == "pseudonymize":
             if value is None or (isinstance(value, str) and value.strip() == ""):
                 out[col] = REDACTED

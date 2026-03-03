@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from stupiphi.models.canonical_record import CanonicalRecord
 from stupiphi.detection.hf_detector import HFDetector
@@ -10,11 +10,11 @@ from stupiphi.detection.structured_detector import StructuredFieldDetector
 from stupiphi.detection.detector_base import Finding
 from stupiphi.transformation.plan import build_conservative_plan
 from stupiphi.transformation.apply import apply_plan
-from stupiphi.audit.audit_log import build_audit_event, AuditEvent
+from stupiphi.audit.audit_log import build_audit_event, to_audit_payload, AuditEvent
 from stupiphi.verification.verify import verify_basic
 
 
-VALID_DB_POLICY_ACTIONS = frozenset({"preserve", "redact", "pseudonymize", "mask"})
+VALID_DB_POLICY_ACTIONS = frozenset({"preserve", "redact", "pseudonymize", "mask", "placeholder"})
 
 
 @dataclass(frozen=True)
@@ -26,8 +26,10 @@ class PipelineConfig:
     enable_structured: bool = True  # Structured-field detector (patient.*)
     pseudonym_salt: str | None = None  # When set, same value -> same pseudonym across records
     # Column-level sanitization during replay: { table_name: { column_name: action } }.
-    # None = preserve everything (current behavior). Actions: preserve, redact, pseudonymize, mask.
+    # None = preserve everything (current behavior). Actions: preserve, redact, pseudonymize, mask, placeholder.
     database_policy: Optional[Dict[str, Dict[str, str]]] = None
+    # For action "placeholder": { "table.column": value }. Used for e.g. password_hash (dev-only placeholder).
+    database_policy_placeholders: Optional[Dict[str, str]] = None
 
 
 @dataclass(frozen=True)
@@ -63,7 +65,11 @@ class SanitizationPipeline:
             findings.extend(self.structured.detect(record))
         return findings
 
-    def sanitize_record(self, record: CanonicalRecord) -> SanitizeResult:
+    def sanitize_record(
+        self,
+        record: CanonicalRecord,
+        audit_sink: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> SanitizeResult:
         findings = self.detect_ensemble(record)
         plan = build_conservative_plan(record_id=record.record_id, findings=findings)
         sanitized, redaction_count = apply_plan(
@@ -76,9 +82,26 @@ class SanitizationPipeline:
             redaction_count=redaction_count,
         )
         verification_ok, verification_issues = verify_basic(sanitized)
-        return SanitizeResult(
+        result = SanitizeResult(
             record=sanitized,
             audit_event=audit_event,
             verification_ok=verification_ok,
             verification_issues=verification_issues,
         )
+        if audit_sink is not None:
+            modifications = [
+                {
+                    "field_path": a.field_path,
+                    "action_type": a.action_type,
+                    "entity_type": a.entity_type if a.entity_type is not None else "UNKNOWN",
+                }
+                for a in plan.actions
+            ]
+            payload = to_audit_payload(
+                audit_event=audit_event,
+                verification_ok=verification_ok,
+                verification_issues=verification_issues,
+                modifications=modifications,
+            )
+            audit_sink(payload)
+        return result

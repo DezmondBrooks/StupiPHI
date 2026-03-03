@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from stupiphi.detection.detector_base import Finding
 from stupiphi.transformation.plan import TransformationPlan
@@ -44,3 +45,33 @@ def build_audit_event(
 
 def to_dict(event: AuditEvent) -> Dict[str, Any]:
     return asdict(event)
+
+
+def to_audit_payload(
+    audit_event: AuditEvent,
+    verification_ok: bool,
+    verification_issues: List[str],
+    modifications: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    """Build the full audit payload for the user's sink (no PHI).
+
+    Includes what was modified (modifications) and what may have made it through
+    (verification_ok, verification_issues) so it is easily identifiable.
+    """
+    payload: Dict[str, Any] = dict(asdict(audit_event))
+    payload["verification_ok"] = verification_ok
+    payload["verification_issues"] = list(verification_issues)
+    payload["modifications"] = list(modifications)
+    return payload
+
+
+def file_audit_sink(path: str) -> Callable[[Dict[str, Any]], None]:
+    """Return a callable that appends one JSON line per payload to the file at path.
+
+    For user-controlled storage: the tool never writes audit itself; the user
+    passes this sink (or their own) when they want file-based audit logging.
+    """
+    def sink(payload: Dict[str, Any]) -> None:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    return sink
