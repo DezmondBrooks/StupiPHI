@@ -33,6 +33,42 @@ stupiphi sanitize
 stupiphi sanitize --config config.yaml --seed 42
 ```
 
+Or via Python (see `examples/quickstart.py` for a full script):
+
+```python
+from stupiphi import SanitizationPipeline, PipelineConfig
+
+cfg = PipelineConfig(hf_min_confidence=0.40, faker_seed=99)
+pipeline = SanitizationPipeline(cfg)
+result = pipeline.sanitize_record(record)
+print(result.record)
+print(result.verification_ok, result.verification_issues)
+print(result.audit_event.to_dict())
+```
+
+---
+
+## Demo checklist (internal use)
+
+- **Python + deps:**
+  - Python >= 3.10 installed.
+  - Run `pip install -e .` from the repo root.
+  - First run will download a Hugging Face NER model (`dslim/bert-base-NER`) and load Torch weights; do this **before** the live demo to avoid waiting.
+- **CLI invocation:**
+  - On Unix/macOS, you can use the `stupiphi` entrypoint directly (e.g. `stupiphi sanitize`).
+  - On Windows, if `stupiphi` is not on `PATH`, use `python -m stupiphi.cli ...` instead:
+    - `python -m stupiphi.cli sanitize --seed 42`
+    - `python -m stupiphi.cli run-eval --count 20 --difficulty hard`
+- **Config:**
+  - For most demos you can rely on defaults; optionally copy `src/stupiphi/config/example.yaml` to `config.yaml` and tweak thresholds or detector toggles.
+- **Postgres / transfer-case (optional):**
+  - The `transfer-case` command requires Postgres env vars:
+    - `PROD_DB_USER`, `PROD_DB_DBNAME` (and optionally `PROD_DB_HOST`, `PROD_DB_PORT`, `PROD_DB_PASSWORD` or a single `PROD_DB_DSN`).
+    - `DEV_DB_USER`, `DEV_DB_DBNAME` (and optionally `DEV_DB_HOST`, `DEV_DB_PORT`, `DEV_DB_PASSWORD` or `DEV_DB_DSN`).
+  - If these are missing, the CLI will fail fast with:
+    - `RuntimeError: PROD_DB_USER and PROD_DB_DBNAME must be set (or PROD_DB_DSN) for Postgres connection`
+  - For a safe demo without a DB, prefer running only `sanitize` and `run-eval`, and describe `transfer-case` verbally.
+
 **Using the API in code:**
 
 ```python
@@ -103,6 +139,28 @@ detectors:
 faker_seed: 99
 # pseudonym_salt: "my-secret-salt"   # optional: stable cross-record mapping
 ```
+
+### Security & deployment
+
+StupiPHI is a **library and CLI**, not an access-control system. Run it in a locked-down environment with least-privilege access:
+
+- **Database access**:
+  - Use a dedicated DB role for StupiPHI with **read-only access to prod** and write access only to the specific dev tables used by `transfer-case`.
+  - Configure `database_policy` so sensitive columns (e.g. `password_hash`, `ssn`, `token`) are **never preserved**; the loader automatically downgrades `preserve` on dangerous column names to `redact`.
+- **Prod → dev transfer guardrail**:
+  - The `transfer-case` job refuses to run unless `STUPIPHI_ALLOW_PROD_TO_DEV` is set in the environment to `true` / `1` / `yes`. This is a coarse-grained safety switch to avoid accidental prod-to-dev copies.
+- **Audit data handling**:
+  - The core pipeline does **not** store audit data; it only calls a user-provided `audit_sink` with a JSON-serializable payload (no raw PHI).
+  - If you want file-based audit, use `file_audit_sink(path)` from `stupiphi.audit.audit_log` in your code or CLI wiring. Do not send audit payloads to external services unless they are approved for PHI/PII metadata.
+
+### Edge cases: usernames and passwords
+
+When copying records from prod to dev (e.g. case transfer), auth-related columns need special handling:
+
+- **Usernames** are PII. In `database_policy`, set **`pseudonymize`** or **`redact`** for username columns so dev data does not contain real credentials. Never use `preserve` for prod usernames.
+- **Passwords / hashed columns** (e.g. `password_hash`) must **never** be copied. Do not use `preserve` or `pseudonymize` for these columns. Use either:
+  - **`redact`**: the column becomes `[REDACTED]`; dev must treat these as “password reset required” or use a separate dev-auth path.
+  - **`placeholder`**: replace the value with a single configured dev-only string (e.g. a precomputed bcrypt hash of a known dev password). Configure the value under `database_policy.placeholders` with key `table.column` (e.g. `users.password_hash`). If no placeholder is configured for that column, the tool falls back to redacting. The placeholder value is for dev only; do not use prod hashes, and do not deploy placeholder config to prod.
 
 ---
 
